@@ -1,0 +1,9 @@
+total 24
+drwxrwxr-x 6 nimra nimra 4096 Nov  8 04:13 base-assignment-03
+drwxrwxr-x 2 nimra nimra 4096 Nov  8 12:42 bin
+-rw-rw-r-- 1 nimra nimra    0 Nov  8 04:10 f1.txt
+-rw-rw-r-- 1 nimra nimra  681 Nov  8 12:42 Makefile
+-rw-rw-r-- 1 nimra nimra  834 Nov  8 04:28 Malefile
+drwxrwxr-x 2 nimra nimra 4096 Nov  8 12:42 obj
+-rw-r--r-- 1 nimra nimra    0 Nov  8 12:43 out.txt
+-rw-rw-r-- 1 nimra nimra  812 Nov  8 04:10 README.md

@@ -22,3 +22,4 @@ obj/execute.o: base-assignment-03/src/execute.c
 
 clean:
 	rm -f obj/*.o $(BIN)
+
