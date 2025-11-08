@@ -1,36 +1,24 @@
-# Compiler and flags
 CC = gcc
 CFLAGS = -Wall -g -Ibase-assignment-03/include
+LDFLAGS = -lreadline
 
-# Directories
-SRC_DIR = base-assignment-03/src
-OBJ_DIR = obj
-BIN_DIR = bin
+SRC = base-assignment-03/src/main.c base-assignment-03/src/shell.c base-assignment-03/src/execute.c
+OBJ = obj/main.o obj/shell.o obj/execute.o
+BIN = bin/myshell
 
-# Source files
-SRCS = $(SRC_DIR)/main.c $(SRC_DIR)/shell.c $(SRC_DIR)/execute.c
+all: $(BIN)
 
-# Object files
-OBJS = $(OBJ_DIR)/main.o $(OBJ_DIR)/shell.o $(OBJ_DIR)/execute.o
+$(BIN): $(OBJ)
+	$(CC) $(CFLAGS) -o $(BIN) $(OBJ) $(LDFLAGS)
 
-# Executable
-TARGET = $(BIN_DIR)/myshell
+obj/main.o: base-assignment-03/src/main.c
+	$(CC) $(CFLAGS) -c base-assignment-03/src/main.c -o obj/main.o
 
-# Default target
-all: $(TARGET)
+obj/shell.o: base-assignment-03/src/shell.c
+	$(CC) $(CFLAGS) -c base-assignment-03/src/shell.c -o obj/shell.o
 
-# Rule to build executable
-$(TARGET): $(OBJS)
-	$(CC) $(CFLAGS) -o $(TARGET) $(OBJS)
+obj/execute.o: base-assignment-03/src/execute.c
+	$(CC) $(CFLAGS) -c base-assignment-03/src/execute.c -o obj/execute.o
 
-# Rule to compile source files into object files
-$(OBJ_DIR)/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-# Create obj directory if it doesn't exist
-$(OBJ_DIR):
-	mkdir -p $(OBJ_DIR)
-
-# Clean compiled files
 clean:
-	rm -rf $(OBJ_DIR)/*.o $(TARGET)
+	rm -f obj/*.o $(BIN)
