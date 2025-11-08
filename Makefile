@@ -1,42 +1,36 @@
-# Compiler
+# Compiler and flags
 CC = gcc
-
-# Compiler flags
 CFLAGS = -Wall -g -Ibase-assignment-03/include
 
 # Directories
 SRC_DIR = base-assignment-03/src
-BIN_DIR = bin
 OBJ_DIR = obj
-
-# Output executable
-TARGET = $(BIN_DIR)/myshell
+BIN_DIR = bin
 
 # Source files
-SRC = $(wildcard $(SRC_DIR)/*.c)
+SRCS = $(SRC_DIR)/main.c $(SRC_DIR)/shell.c $(SRC_DIR)/execute.c
 
 # Object files
-OBJ = $(patsubst $(SRC_DIR)/%.c, $(OBJ_DIR)/%.o, $(SRC))
+OBJS = $(OBJ_DIR)/main.o $(OBJ_DIR)/shell.o $(OBJ_DIR)/execute.o
+
+# Executable
+TARGET = $(BIN_DIR)/myshell
 
 # Default target
-all: $(BIN_DIR) $(OBJ_DIR) $(TARGET)
+all: $(TARGET)
 
-# Link object files to create executable
-$(TARGET): $(OBJ)
-	$(CC) $(CFLAGS) -o $@ $^
+# Rule to build executable
+$(TARGET): $(OBJS)
+	$(CC) $(CFLAGS) -o $(TARGET) $(OBJS)
 
-# Compile each .c file to .o
-$(OBJ_DIR)/%.o: $(SRC_DIR)/%.c
+# Rule to compile source files into object files
+$(OBJ_DIR)/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-# Create bin directory if it does not exist
-$(BIN_DIR):
-	mkdir -p $(BIN_DIR)
-
-# Create obj directory if it does not exist
+# Create obj directory if it doesn't exist
 $(OBJ_DIR):
 	mkdir -p $(OBJ_DIR)
 
-# Clean object files and executable
+# Clean compiled files
 clean:
 	rm -rf $(OBJ_DIR)/*.o $(TARGET)
