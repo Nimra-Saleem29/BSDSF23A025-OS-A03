@@ -1,7 +1,7 @@
 #ifndef SHELL_H
 #define SHELL_H
 
-// Standard headers needed by multiple files
+#define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -19,35 +19,36 @@
 #define MAX_CMDS 16
 #define MAX_JOBS 128
 
-// Represents a single simple command in a pipeline
 typedef struct {
     char *argv[MAX_ARGS];   // argv for execvp, NULL terminated
-    char *input_file;       // filename after '<' or NULL
-    char *output_file;      // filename after '>' or NULL
+    char *input_file;       // filename for '<'
+    char *output_file;      // filename for '>'
 } Command;
 
-// Represents a background job
 typedef struct {
-    pid_t pid;              // PID of pipeline leader
-    char *cmdline;          // allocated copy of original command string
+    pid_t pid;
+    char *cmdline;
 } Job;
 
-// Parsing and execution
+/* Parsing and memory */
 int parse_pipeline(char *line, Command *cmds, int *num_cmds);
 void free_commands(Command *cmds, int num_cmds);
-// execute_pipeline runs the pipeline; if background==1, it registers a job and returns immediately
+char *trim(char *s);
+
+/* Execution */
+/* execute_pipeline:
+ *  - if background == 0: returns exit code (0..255) of pipeline, or -1 on parse/exec error.
+ *  - if background == 1: registers background job and returns 0 on success or -1 on error.
+ */
 int execute_pipeline(Command *cmds, int num_cmds, int background, const char *orig_cmdline);
 
-// Built-ins
-int handle_builtin(char **arglist);
+/* Builtins */
+int handle_builtin_status(char **arglist, int *status);
 
-// Job management
+/* Job management */
 int add_job(pid_t pid, const char *cmdline);
 int remove_job_by_pid(pid_t pid);
 void print_jobs(void);
 void reap_jobs(void);
-
-// Utility
-char *trim(char *s);
 
 #endif // SHELL_H
