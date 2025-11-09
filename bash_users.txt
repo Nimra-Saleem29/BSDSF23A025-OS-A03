@@ -1,0 +1,3 @@
+root:x:0:0:root:/root:/bin/bash
+postgres:x:114:118:PostgreSQL administrator:/var/lib/postgresql:/bin/bash
+nimra:x:1000:1000:nimra,,,:/home/nimra:/bin/bash
