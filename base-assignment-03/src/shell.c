@@ -212,7 +212,7 @@ int handle_builtin_status(char **arglist, int *status) {
                " help - display this message\n"
                " jobs - list background jobs\n"
                " history - show command history\n"
-               " set - list variables\n");
+               " set - list variables\n"); // <-- UPDATED: added 'set'
         *status = 0;
         return 1;
     } else if (strcmp(arglist[0], "jobs") == 0) {
@@ -274,22 +274,15 @@ void reap_jobs(void) {
     }
 }
 
-/* ----------------- Execution: pipelines & redirection -------------
- * execute_pipeline returns:
- *   - if foreground: the exit code (0..255) of the last process in the pipeline
- *   - if background: 0 if job registered successfully (we do not block)
- *   - on error: -1
- */
+/* ----------------- Execution: pipelines & redirection ------------- */
 int execute_pipeline(Command *cmds, int num_cmds, int background, const char *orig_cmdline) {
     if (num_cmds <= 0) return -1;
 
-    // Expand variables before executing
     if (expand_vars_in_commands(cmds, num_cmds) != 0) {
         fprintf(stderr, "Variable expansion error\n");
         return -1;
     }
 
-    // If single command and it's a builtin and foreground, handle and return status
     if (num_cmds == 1 && !background) {
         int bstatus = 0;
         if (handle_builtin_status(cmds[0].argv, &bstatus)) {
@@ -301,7 +294,6 @@ int execute_pipeline(Command *cmds, int num_cmds, int background, const char *or
     int pipefds[2 * (n - 1)];
     pid_t pids[n];
 
-    // create pipes
     for (int i = 0; i < n - 1; ++i) {
         if (pipe(pipefds + 2 * i) < 0) {
             perror("pipe");
@@ -318,24 +310,20 @@ int execute_pipeline(Command *cmds, int num_cmds, int background, const char *or
             return -1;
         }
         if (pid == 0) {
-            // Child
             if (i > 0) {
                 if (dup2(pipefds[(i - 1) * 2], STDIN_FILENO) < 0) { perror("dup2 stdin"); exit(1); }
             }
             if (i < n - 1) {
                 if (dup2(pipefds[i * 2 + 1], STDOUT_FILENO) < 0) { perror("dup2 stdout"); exit(1); }
             }
-            // close all pipe fds in child
             for (int k = 0; k < 2 * (n - 1); ++k) close(pipefds[k]);
 
-            // input redirect
             if (cmds[i].input_file) {
                 int fd = open(cmds[i].input_file, O_RDONLY);
                 if (fd < 0) { perror("open input"); exit(1); }
                 if (dup2(fd, STDIN_FILENO) < 0) { perror("dup2 infile"); close(fd); exit(1); }
                 close(fd);
             }
-            // output redirect
             if (cmds[i].output_file) {
                 int fd = open(cmds[i].output_file, O_WRONLY | O_CREAT | O_TRUNC, 0644);
                 if (fd < 0) { perror("open output"); exit(1); }
@@ -347,12 +335,10 @@ int execute_pipeline(Command *cmds, int num_cmds, int background, const char *or
             perror("execvp");
             exit(1);
         } else {
-            // parent
             pids[i] = pid;
         }
     }
 
-    // parent closes all fds
     for (int k = 0; k < 2 * (n - 1); ++k) close(pipefds[k]);
 
     if (background) {
