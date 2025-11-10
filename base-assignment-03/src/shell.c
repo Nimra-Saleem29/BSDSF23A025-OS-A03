@@ -63,7 +63,7 @@ int parse_pipeline(char *line, Command *cmds, int *num_cmds) {
     return 0;
 }
 
-/* ----------------- Free memory ----------------- */
+/* ----------------- Free memory inside commands ----------------- */
 void free_commands(Command *cmds, int num_cmds) {
     for (int i = 0; i < num_cmds; ++i) {
         for (int j = 0; j < MAX_ARGS && cmds[i].argv[j] != NULL; ++j) {
@@ -75,14 +75,126 @@ void free_commands(Command *cmds, int num_cmds) {
     }
 }
 
+/* ----------------- Variables handling ----------------- */
+/* Linked list of VarNode */
+static VarNode *vars_head = NULL;
+
+static VarNode *find_var(const char *name) {
+    VarNode *cur = vars_head;
+    while (cur) {
+        if (strcmp(cur->name, name) == 0) return cur;
+        cur = cur->next;
+    }
+    return NULL;
+}
+
+int set_variable(const char *name, const char *value) {
+    if (!name) return -1;
+    VarNode *node = find_var(name);
+    if (node) {
+        /* replace value */
+        free(node->value);
+        node->value = value ? strdup(value) : strdup("");
+        return 0;
+    }
+    /* create new node */
+    VarNode *n = malloc(sizeof(VarNode));
+    if (!n) return -1;
+    n->name = strdup(name);
+    n->value = value ? strdup(value) : strdup("");
+    n->next = vars_head;
+    vars_head = n;
+    return 0;
+}
+
+const char *get_variable(const char *name) {
+    VarNode *n = find_var(name);
+    if (!n) return NULL;
+    return n->value;
+}
+
+void print_variables(void) {
+    VarNode *cur = vars_head;
+    if (!cur) { printf("No variables set.\n"); return; }
+    while (cur) {
+        printf("%s=%s\n", cur->name, cur->value ? cur->value : "");
+        cur = cur->next;
+    }
+}
+
+void free_all_variables(void) {
+    VarNode *cur = vars_head;
+    while (cur) {
+        VarNode *tmp = cur;
+        cur = cur->next;
+        free(tmp->name);
+        free(tmp->value);
+        free(tmp);
+    }
+    vars_head = NULL;
+}
+
+/* Expand variables in a single token which may contain a leading '$' only.
+ * For now we support tokens that are exactly $VAR or "${VAR}".
+ * Returns a newly allocated string (caller should free) or NULL on error.
+ * If variable undefined, replace with empty string.
+ */
+static char *expand_token(const char *token) {
+    if (!token) return NULL;
+    if (token[0] != '$') return strdup(token);
+
+    /* handle ${VAR} */
+    if (token[1] == '{') {
+        const char *end = strchr(token + 2, '}');
+        if (!end) {
+            /* malformed, return token unchanged */
+            return strdup(token);
+        }
+        size_t nlen = end - (token + 2);
+        char name[256];
+        if (nlen >= sizeof(name)) return strdup("");
+        strncpy(name, token + 2, nlen);
+        name[nlen] = '\0';
+        const char *val = get_variable(name);
+        return strdup(val ? val : "");
+    }
+
+    /* $VAR simple form */
+    const char *name = token + 1;
+    const char *val = get_variable(name);
+    return strdup(val ? val : "");
+}
+
+/* Expand variables in all cmds/argv in-place: free old argv strings and replace with expanded ones.
+ * Returns 0 on success, -1 on error.
+ */
+int expand_vars_in_commands(Command *cmds, int num_cmds) {
+    for (int i = 0; i < num_cmds; ++i) {
+        for (int j = 0; j < MAX_ARGS && cmds[i].argv[j] != NULL; ++j) {
+            char *orig = cmds[i].argv[j];
+            if (orig[0] == '$') {
+                char *expanded = expand_token(orig);
+                if (!expanded) return -1;
+                free(orig);
+                cmds[i].argv[j] = expanded;
+            } else {
+                /* no change */
+            }
+        }
+    }
+    return 0;
+}
+
 /* ----------------- Builtins with status -----------------
  * If builtin handled, return 1 and set *status to 0..255; else return 0.
+ * Also adds 'set' builtin to list variables, and supports assignment detection externally.
  */
 int handle_builtin_status(char **arglist, int *status) {
     if (!arglist || !arglist[0]) return 0;
 
     if (strcmp(arglist[0], "exit") == 0) {
         *status = 0;
+        free_all_variables();
         exit(0);
     } else if (strcmp(arglist[0], "cd") == 0) {
         if (!arglist[1]) {
@@ -99,7 +211,8 @@ int handle_builtin_status(char **arglist, int *status) {
                " cd <dir> - change directory\n"
                " help - display this message\n"
                " jobs - list background jobs\n"
-               " history - show command history\n");
+               " history - show command history\n"
+               " set - list variables\n");
         *status = 0;
         return 1;
     } else if (strcmp(arglist[0], "jobs") == 0) {
@@ -111,6 +224,10 @@ int handle_builtin_status(char **arglist, int *status) {
         if (hist) {
             for (int i = 0; hist[i]; ++i) printf("%d %s\n", i + 1, hist[i]->line);
         }
+        *status = 0;
+        return 1;
+    } else if (strcmp(arglist[0], "set") == 0) {
+        print_variables();
         *status = 0;
         return 1;
     }
@@ -165,6 +282,12 @@ void reap_jobs(void) {
  */
 int execute_pipeline(Command *cmds, int num_cmds, int background, const char *orig_cmdline) {
     if (num_cmds <= 0) return -1;
+
+    // Expand variables before executing
+    if (expand_vars_in_commands(cmds, num_cmds) != 0) {
+        fprintf(stderr, "Variable expansion error\n");
+        return -1;
+    }
 
     // If single command and it's a builtin and foreground, handle and return status
     if (num_cmds == 1 && !background) {

@@ -19,16 +19,25 @@
 #define MAX_CMDS 16
 #define MAX_JOBS 128
 
+/* Command structure for pipeline parsing */
 typedef struct {
     char *argv[MAX_ARGS];   // argv for execvp, NULL terminated
     char *input_file;       // filename for '<'
     char *output_file;      // filename for '>'
 } Command;
 
+/* Background job */
 typedef struct {
     pid_t pid;
     char *cmdline;
 } Job;
+
+/* Variable linked list node */
+typedef struct VarNode {
+    char *name;
+    char *value;
+    struct VarNode *next;
+} VarNode;
 
 /* Parsing and memory */
 int parse_pipeline(char *line, Command *cmds, int *num_cmds);
@@ -50,5 +59,14 @@ int add_job(pid_t pid, const char *cmdline);
 int remove_job_by_pid(pid_t pid);
 void print_jobs(void);
 void reap_jobs(void);
+
+/* Variables API */
+int set_variable(const char *name, const char *value);   // returns 0 on success
+const char *get_variable(const char *name);              // returns NULL if not found
+void print_variables(void);
+void free_all_variables(void);
+
+/* Utility for expansion: expand variables in argv lists (in-place replacement) */
+int expand_vars_in_commands(Command *cmds, int num_cmds);
 
 #endif // SHELL_H

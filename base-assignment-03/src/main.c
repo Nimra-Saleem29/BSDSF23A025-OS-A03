@@ -3,7 +3,7 @@
 
 /* completion list for readline */
 const char* builtin_commands[] = {
-    "cd", "exit", "help", "jobs", "history", NULL
+    "cd", "exit", "help", "jobs", "history", "set", NULL
 };
 
 static char* command_generator(const char* text, int state) {
@@ -22,13 +22,73 @@ static char** my_completion(const char* text, int start, int end) {
     return NULL;
 }
 
-/* Helper: run a single statement (may contain pipes/redirs), returns exit status or -1 on error.
- * For statements ending with '&' this will register a background job and return 0.
+/* Helper: run a single statement (may contain pipes/redirs) or assignment.
+ * Returns exit status or -1 on error.
+ * Assignments (VARNAME=VALUE with no spaces around '=') are handled here as builtin and return 0.
  */
 static int run_statement_return_status(char *stmt) {
     if (!stmt) return -1;
     char *s = trim(stmt);
     if (s[0] == '\0') return 0;
+
+    // detect variable assignment: single token containing '=' and no spaces around =
+    // we check first token only: assignments are of form NAME=value (no spaces)
+    char *first_space = strpbrk(s, " \t");
+    int is_assignment = 0;
+    if (first_space == NULL) {
+        // whole line is a single token; if contains '=' then assignment
+        if (strchr(s, '=') != NULL) is_assignment = 1;
+    } else {
+        // there's a space — check the first token only
+        size_t toklen = first_space - s;
+        char tokbuf[256];
+        if (toklen < sizeof(tokbuf)) {
+            strncpy(tokbuf, s, toklen);
+            tokbuf[toklen] = '\0';
+            if (strchr(tokbuf, '=') != NULL) {
+                // ensure '=' is not at start or end of token
+                char *eq = strchr(tokbuf, '=');
+                if (eq != NULL && (eq != tokbuf) && (*(eq + 1) != '\0')) {
+                    is_assignment = 1;
+                }
+            }
+        }
+    }
+
+    if (is_assignment) {
+        // parse name and value from first token
+        char *eq = strchr(s, '=');
+        if (!eq) return -1;
+        size_t namelen = eq - s;
+        if (namelen == 0 || namelen >= 128) {
+            fprintf(stderr, "Invalid variable name\n");
+            return -1;
+        }
+        char name[128];
+        strncpy(name, s, namelen);
+        name[namelen] = '\0';
+        // value is rest after '=' (may include quotes)
+        char *value = eq + 1;
+        // remove surrounding quotes if present
+        char *val_trim = trim(value);
+        size_t vlen = strlen(val_trim);
+        char *final_val = NULL;
+        if (vlen >= 2 && ((val_trim[0] == '"' && val_trim[vlen - 1] == '"') ||
+                          (val_trim[0] == '\'' && val_trim[vlen - 1] == '\''))) {
+            final_val = strndup(val_trim + 1, vlen - 2);
+        } else {
+            final_val = strdup(val_trim);
+        }
+        if (!final_val) return -1;
+        // set variable (overwrite if exists)
+        if (set_variable(name, final_val) != 0) {
+            fprintf(stderr, "Failed to set variable\n");
+            free(final_val);
+            return -1;
+        }
+        free(final_val);
+        return 0;
+    }
 
     // background detection for single statement (trailing &)
     int background = 0;
@@ -58,7 +118,7 @@ static int run_statement_return_status(char *stmt) {
     return ret;
 }
 
-/* Split by ';' and run each statement sequentially (foreground/background handled individually) */
+/* Split by ';' and run each statement sequentially */
 static void process_multi_statements(char *line) {
     char *save = NULL;
     char *stmt = strtok_r(line, ";", &save);
@@ -71,10 +131,7 @@ static void process_multi_statements(char *line) {
     }
 }
 
-/* Read lines until keyword (case-insensitive) is found on its own trimmed line.
- * Returns a newly allocated string with concatenated lines separated by '\n' (caller must free),
- * or NULL on EOF/error.
- */
+/* Collect lines until a keyword (case-insensitive) appears on its own line */
 static char *collect_block_until_keyword(const char *terminator) {
     size_t cap = 1024, len = 0;
     char *buf = malloc(cap);
@@ -85,10 +142,7 @@ static char *collect_block_until_keyword(const char *terminator) {
         char *line = readline("> ");
         if (!line) { free(buf); return NULL; } // EOF
         char *t = trim(line);
-        if (strcasecmp(t, terminator) == 0) {
-            free(line);
-            break;
-        }
+        if (strcasecmp(t, terminator) == 0) { free(line); break; }
         size_t add = strlen(line) + 1;
         if (len + add + 1 > cap) {
             cap = (len + add + 1) * 2;
@@ -105,23 +159,16 @@ static char *collect_block_until_keyword(const char *terminator) {
     return buf;
 }
 
-/* Handle interactive if-then-else-fi block.
- * tline points to the trimmed line that started with 'if' (it may include the condition after 'if').
- * Returns 0 on success or -1 on parse/exec error.
- */
+/* handle if-blocks (same behavior as previous Feature-7 implementation) */
 static int handle_if_block(char *tline) {
     if (!tline) return -1;
-    // tline begins with "if" (possibly "if <condition...>")
     char *after_if = tline + 2;
     while (*after_if && isspace((unsigned char)*after_if)) after_if++;
     char *condition_cmd = NULL;
-
     if (*after_if != '\0') {
-        // condition is on same line after 'if '
         condition_cmd = strdup(after_if);
         if (!condition_cmd) return -1;
     } else {
-        // read next non-empty line as condition
         char *cline = NULL;
         while (1) {
             cline = readline("> ");
@@ -135,20 +182,17 @@ static int handle_if_block(char *tline) {
         if (!condition_cmd) return -1;
     }
 
-    // Now expect a 'then' line (trimmed "then")
     while (1) {
         char *ln = readline("> ");
         if (!ln) { free(condition_cmd); fprintf(stderr, "Unexpected EOF waiting for 'then'\n"); return -1; }
         char *t = trim(ln);
         if (strcasecmp(t, "then") == 0) { free(ln); break; }
-        // ignore blank lines and comments; but if user types something else, continue prompting
         free(ln);
     }
 
-    // collect then-block (until 'else' or 'fi')
     char *then_block = NULL;
-    size_t then_cap = 0, then_len = 0;
     int saw_else = 0;
+    size_t then_cap = 0, then_len = 0;
     while (1) {
         char *ln = readline("> ");
         if (!ln) { free(condition_cmd); free(then_block); fprintf(stderr, "Unexpected EOF in then-block\n"); return -1; }
@@ -172,34 +216,28 @@ static int handle_if_block(char *tline) {
 
     char *else_block = NULL;
     if (saw_else) {
-        // collect else-block until 'fi'
         else_block = collect_block_until_keyword("fi");
         if (!else_block) { free(condition_cmd); free(then_block); return -1; }
     }
 
-    // Execute condition command and get exit status
     int cond_status = run_statement_return_status(condition_cmd);
     free(condition_cmd);
 
-    // If cond_status == -1 treat as failure (non-zero)
-    int choose_then = (cond_status == 0);
-
-    // Execute chosen block
-    int rc = 0;
-    if (choose_then) {
+    if (cond_status == 0) {
         if (then_block && then_block[0] != '\0') {
-            // process multiple statements inside then block
-            process_multi_statements(then_block);
+            char *tmp = strdup(then_block);
+            if (tmp) { process_multi_statements(tmp); free(tmp); }
         }
     } else {
         if (else_block && else_block[0] != '\0') {
-            process_multi_statements(else_block);
+            char *tmp = strdup(else_block);
+            if (tmp) { process_multi_statements(tmp); free(tmp); }
         }
     }
 
     free(then_block);
     free(else_block);
-    return rc;
+    return 0;
 }
 
 int main(void) {
@@ -234,18 +272,14 @@ int main(void) {
             if (!tline || tline[0] == '\0') { free(line); continue; }
         }
 
-        // Detect if this starts with "if" as a standalone word
+        // Detect 'if' blocks
         char *copy = strdup(tline);
         if (!copy) { free(line); break; }
         char *first = strtok(copy, " \t");
         if (first && strcmp(first, "if") == 0) {
-            // handle multi-line if block
-            int hf = handle_if_block(tline);
+            handle_if_block(tline);
             free(copy);
             free(line);
-            if (hf != 0) {
-                // errors already printed by helper
-            }
             continue;
         }
         free(copy);
@@ -258,6 +292,7 @@ int main(void) {
         free(line);
     }
 
+    free_all_variables();
     printf("\nShell exited.\n");
     return 0;
 }
